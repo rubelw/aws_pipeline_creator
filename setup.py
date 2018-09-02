@@ -7,7 +7,7 @@ import sys
 
 DESCRIPTION = ("Creates AWS Codepipeline.")
 LONG_DESCRIPTION = open('README.rst').read()
-VERSION = '0.0.2'
+VERSION = '0.0.3'
 
 setup_requires = (
     ['pytest-runner'] if any(x in sys.argv for x in ('pytest', 'test', 'ptr')) else []

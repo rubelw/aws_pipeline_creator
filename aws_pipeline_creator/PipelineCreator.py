@@ -52,7 +52,11 @@ class PipelineCreator:
             logging.error('config block was garbage')
             raise SystemError
 
-        config_block['environment']['template'] = self.get_template()
+        if 'template' in config_block:
+            if debug:
+                print('template provided in config block')
+        else:
+            config_block['environment']['template'] = self.get_template()
 
 
         self.stack_driver = CloudStackUtility(config_block)

@@ -21,13 +21,12 @@ def lineno():
 
 
 @click.group()
-@click.version_option(version='0.0.3')
+@click.version_option(version='0.0.2')
 def cli():
     pass
 
 
 @cli.command()
-@click.option('--template', '-t', help='If you choose to submit your own template if must be in format specified on the README', required=True)
 @click.option('--version', '-v', help='code version')
 @click.option('--dryrun', '-d', help='dry run', is_flag=True)
 @click.option(
@@ -38,7 +37,6 @@ def cli():
 @click.option('--ini', '-i', help='INI file with needed information', required=True)
 @click.option('--debug', help='Turn on debugging', required=False, is_flag=True)
 def upsert(
-        template,
         version,
         dryrun,
         yaml,
@@ -56,9 +54,6 @@ def upsert(
         print('[environment] section is required in the INI file')
         sys.exit(1)
 
-    if 'template' in ini_data['environment']:
-        dir_path = os.path.dirname(os.path.realpath(__file__))
-        ini_data['environment']['template']= str(dir_path)+'/'+str(ini_data['environment']['template'])
 
     if 'region' not in ini_data['environment']:
         ini_data['environment']['region'] = find_myself()

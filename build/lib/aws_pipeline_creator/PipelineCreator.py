@@ -1,109 +1,160 @@
-
-AWS Codepipeline Creator
-========================
-
-Features
-========
-
-aws-pipeline-creator creates a aws codepipeline cloudformation stack, and points to a build specifical file in the code repository
-
-
-Installation
-============
-
-aws-pipeline-creator is on PyPI so all you need is:
-
-.. code:: console
-
-   $ pip install aws-pipeline-creator
+from __future__ import absolute_import, division, print_function
+import logging
+import inspect
+import os
+import sys
+import json
+import traceback
+import boto3
+from stackility import CloudStackUtility
+from tempfile import NamedTemporaryFile
+from configparser import RawConfigParser
+from stackility import StackTool
 
 
-Example
-=======
+try:
+    POLL_INTERVAL = os.environ.get('CSU_POLL_INTERVAL', 30)
+except:
+    POLL_INTERVAL = 30
 
-Getting help
-
-.. code:: console
-
-   $ pipeline-creator upsert --help
-   Usage: pipeline-creator upsert [OPTIONS]
-
-      primary function for creating a bucket :return:
-
-    Options:
-      -v, --version TEXT  code version
-      -d, --dryrun        dry run
-      -y, --yaml          YAML template (deprecated - YAMLness is now detected at
-                          run-time
-      --no-poll           Start the stack work but do not poll
-      -i, --ini TEXT      INI file with needed information  [required]
-      --debug             Turn on debugging
-      --help              Show this message and exit.
-
-.. code:: console
-
-   pipeline-creator upsert -i config/my.ini
+def lineno():
+    """Returns the current line number in our program."""
+    return str(' - PipelineCreator - line number: '+str(inspect.currentframe().f_back.f_lineno))
 
 
+class PipelineCreator:
+    """
+    Creates an S3 Bucket
+    """
 
-Example Ini file
-
-.. code:: console
-
-    [environment]
-    # This is a general bucket where the cloudformation template will be uploaded to prior to deployment
-    bucket = cloudformation-templates
-    # The name you want on the cloudformation stack
-    stack_name = my-stack-name
-    region = us-east-1
-    profile = my-aws-profile
+    def __init__(self, config_block, debug, project_name):
+        """
+        Initialize PipelineCreator
+        :param config_block:
+        """
 
 
-    [tags]
-    # These are the tags which will be automatically applied to resources
-    Name = test-codepipeline
-    ResourceOwner = my_boss
-    Project = MyCoolProject
-    DeployedBy = me
+        self.debug = False
+        self.project_name = None
 
-    [parameters]
-    # CodeCommit repository name
-    RepositoryName = repo_name
-    # Codecommit repository branch name
-    RepositoryBranchName = master
-    # A project name or code
-    Project = test
-    ProjectDescription =  test
-    # The role which is utilized for the code pipeline, see below for an example role policy
-    BuildServiceRole = arn:aws:iam::123456789:role/AWSCodebuildRole
-    BuildProjectName = MyBuild
-    Subnets = subnet-c1234556
-    SecurityGroups = sg-123456
-    Timeout = 60
-    # The location in the repository where the build spec file is located
-    BuildspecFile = folder/buildspec.yml
-    # Set the environment code.  This is how developers code deployments in the build spec.
-    # If EnvCode = dev, then do this, if EnvCode is prod, then do that
-    EnvironmentCode = dev
-    VpcId = vpc-123456
-    # This is a bucket where the builds from each stage in the build process are stored
-    DeploymentBucketName = codepipeline-deployments
-    # The image to utilize
-    # You can also use default AWS images from https://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref-available.html
-    # Example: Image = aws/codebuild/docker:17.09.0
-    Image = 123456789.dkr.ecr.us-east-1.amazonaws.com/codepipeline:latest
+        if debug:
+            self.debug = debug
+
+        if project_name:
+            self.project_name = project_name
+        else:
+            print('Need to have metadata parameters with project name')
+            sys.exit(1)
+
+        if config_block:
+            self._config = config_block
+        else:
+            logging.error('config block was garbage')
+            raise SystemError
+
+        config_block['environment']['template'] = self.get_template()
 
 
-    [meta-parameters]
-    # These are the metadata parameters which are applied to the template via jinja2
-    ProjectName = myproject
+        self.stack_driver = CloudStackUtility(config_block)
 
-Example Template
 
-Just add more stages as needed, but keep the same format.
+    def create(self):
+        """
+        Create a bucket
+        :return: rendered results
+        """
 
+        if self.debug:
+            print('##################################')
+            print('PipelineCreator - create'+lineno())
+            print('##################################')
+
+        poll_stack = not self.stack_driver._config.get('no_poll', False)
+
+        print('## poll stack')
+        if self.stack_driver.upsert():
+            logging.info('stack create/update was started successfully.')
+
+            if poll_stack:
+                print('poll stack')
+                if self.stack_driver.poll_stack():
+                    logging.info('stack create/update was finished successfully.')
+                    try:
+                        profile = self.stack_driver._config.get('environment', {}).get('profile')
+                        if profile:
+                            boto3_session = boto3.session.Session(profile_name=profile)
+                        else:
+                            boto3_session = boto3.session.Session()
+
+                        region = self.stack_driver._config['environment']['region']
+                        stack_name = self.stack_driver._config['environment']['stack_name']
+
+                        cf_client = self.stack_driver.get_cloud_formation_client()
+
+                        if not cf_client:
+                            cf_client = boto3_session.client('cloudformation', region_name=region)
+
+                        print('calling stacktool')
+                        stack_tool = stack_tool = StackTool(
+                            stack_name,
+                            region,
+                            cf_client
+                        )
+                        stack_tool.print_stack_info()
+                    except Exception as wtf:
+                        logging.warning('there was a problems printing stack info: {}'.format(wtf))
+
+                    sys.exit(0)
+                else:
+                    logging.error('stack create/update was did not go well.')
+                    sys.exit(1)
+        else:
+            logging.error('start of stack create/update did not go well.')
+            sys.exit(1)
+
+
+    def find_myself(self):
+        """
+        Find myself
+        Args:
+            None
+        Returns:
+           An Amazon region
+        """
+        s = boto3.session.Session()
+        return s.region_name
+
+    def read_config_info(self, ini_file):
+        """
+        Read the INI file
+        Args:
+            ini_file - path to the file
+        Returns:
+            A dictionary of stuff from the INI file
+        Exits:
+            1 - if problems are encountered
+        """
+        try:
+            config = RawConfigParser()
+            config.optionxform = lambda option: option
+            config.read(ini_file)
+            the_stuff = {}
+            for section in config.sections():
+                the_stuff[section] = {}
+                for option in config.options(section):
+                    the_stuff[section][option] = config.get(section, option)
+
+            return the_stuff
+        except Exception as wtf:
+            logging.error('Exception caught in read_config_info(): {}'.format(wtf))
+            traceback.print_exc(file=sys.stdout)
+            return sys.exit(1)
+
+    def get_template(self):
+
+        template = {
             "AWSTemplateFormatVersion": "2010-09-09",
-            "Description": "CodePipeline for {{ProjectName}}),
+            "Description": "CodePipeline for "+str(self.project_name),
             "Parameters": {
                 "Project": {
                     "Description": "The project code which owns this stack",
@@ -277,105 +328,18 @@ Just add more stages as needed, but keep the same format.
         }
 
 
-Example IAM Role for the CodeBuild
+        f = NamedTemporaryFile(delete=False)
 
-.. code:: console
+        # Save original name (the "name" actually is the absolute path)
+        original_path = f.name
 
-		"AWSCodebuildRole": {
-			"Type": "AWS::IAM::Role",
-			"Properties": {
-				"RoleName": "AWSCodebuildRole",
-				"AssumeRolePolicyDocument": {
-					"Version": "2012-10-17",
-					"Statement": [{
-						"Effect": "Allow",
-						"Principal": {
-							"Service": [
-								"codebuild.amazonaws.com",
-								"codepipeline.amazonaws.com",
-								"events.amazonaws.com"
-							]
-						},
-						"Action": [
-							"sts:AssumeRole"
-						]
-					}]
-				},
-				"ManagedPolicyArns": [
-					"arn:aws:iam::123456789:policy/CustomPolicy",
-					"arn:aws:iam::aws:policy/AmazonEC2FullAccess",
-					"arn:aws:iam::aws:policy/AWSCodeCommitReadOnly",
-					"arn:aws:iam::aws:policy/CloudFrontFullAccess",
-					"arn:aws:iam::aws:policy/AmazonSSMFullAccess"
-				],
-				"Policies": [{
-						"PolicyName": "AllowKmsDecryptForSSMParameterStore",
-						"PolicyDocument": {
-							"Version": "2012-10-17",
-							"Statement": [{
-								"Effect": "Allow",
-								"Action": [
-									"kms:Decrypt"
-								],
-								"Resource": [
-									"arn:aws:kms:us-east-1:123456789:key/123-456-789"
-								]
-							}]
-						}
-					},
-					{
-						"PolicyName": "AssumeOwnRole",
-						"PolicyDocument": {
-							"Version": "2012-10-17",
-							"Statement": [{
-								"Effect": "Allow",
-								"Action": [
-									"sts:AssumeRole"
-								],
-								"Resource": [
-									"arn:aws:iam::123456789:role/AWSCodebuildRole",
-									"arn:aws:iam::123456789:assumedrole/AWSCodebuildRole"
-								]
-							}]
-						}
-					},
-					{
-						"PolicyName": "AssumeBuildRoleInAnotherAccount",
-						"PolicyDocument": {
-							"Version": "2012-10-17",
-							"Statement": [{
-								"Effect": "Allow",
-								"Action": [
-									"sts:AssumeRole"
-								],
-								"Resource": [
-									"arn:aws:iam::111111111111:role/AWSCodebuildRole",
-									"arn:aws:sts::111111111111:assumed-role/AWSCodebuildRole/*"
-								]
-							}]
-						}
-					},
-					{
-						"PolicyName": "ecs-service",
-						"PolicyDocument": {
-							"Version": "2012-10-17",
-							"Statement": [{
-								"Action": [
-									"ecr:*",
-									"codebuild:*",
-									"codepipeline:*",
-									"s3:*",
-									"codecommit:*",
-									"logs:*",
-									"cloudwatch:*",
-									"lambda:*",
-									"athena:*"
-								],
-								"Resource": "*",
-								"Effect": "Allow"
-							}]
-						}
-					}
-				]
-			}
-		}
+        if self.debug:
+            print('original_path: '+str(original_path))
+            print('path: '+str(os.path.dirname(original_path)))
+        # Change the file name to something
+        f.name = str(os.path.dirname(original_path))+'/myfilename.json'
+
+        with open(f.name, 'w') as file:
+            file.write(json.dumps(template))
+
+        return f.name
