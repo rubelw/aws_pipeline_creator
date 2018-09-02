@@ -24,7 +24,7 @@ def lineno():
 
 class PipelineCreator:
     """
-    Creates an S3 Bucket
+    Creates an AWS Codepipeline
     """
 
     def __init__(self, config_block, debug, project_name):
@@ -55,6 +55,10 @@ class PipelineCreator:
         if 'template' in config_block:
             if debug:
                 print('template provided in config block')
+
+            if not self.validate_template():
+                print('Template not validated')
+                sys.exit(1)
         else:
             config_block['environment']['template'] = self.get_template()
 
@@ -64,7 +68,7 @@ class PipelineCreator:
 
     def create(self):
         """
-        Create a bucket
+        Create a pipeline
         :return: rendered results
         """
 
@@ -153,6 +157,37 @@ class PipelineCreator:
             logging.error('Exception caught in read_config_info(): {}'.format(wtf))
             traceback.print_exc(file=sys.stdout)
             return sys.exit(1)
+
+
+    def validate_template(self):
+
+        datastore = json.load(f)
+
+        with open(f.name, 'r') as file:
+            template = json.loads(self.config_block['template'])
+
+
+        if 'Parameters' in template:
+
+            for parameter in template['parameters']:
+                if parameter not in ["Project", "ProjectDescription", "DeploymentBucketName", "Image", "RepositoryName", "RepositoryBranchName", "BuildServiceRole", "Subnets", "SecurityGroups", "VpcId", "BuildProjectName", "EnvironmentCode", "BuildspecFile"]:
+                    print('Parameter: '+str(parameter)+ ' is not in the template.  Make sure the template matches the readme')
+                    sys.exit(1)
+        else:
+            print('Parameter must be in template')
+            sys.exit(1)
+
+        if 'Resources' in template:
+
+            for resource in template['Resources']:
+                if resource not in ["LogGroup", "CodeBuildProject", "Pipeline"]:
+                    print('Resource: '+str(resource)+ ' is not in the template.  Make sure the template matches the readme')
+                    sys.exit(1)
+        else:
+            print('Resource must be in template')
+            sys.exit(1)
+
+        return True
 
     def get_template(self):
 

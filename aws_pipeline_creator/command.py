@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import inspect
 import logging
+import os
 import time
 import traceback
 from configparser import RawConfigParser
@@ -21,33 +22,26 @@ def lineno():
 
 
 @click.group()
-@click.version_option(version='0.0.3')
+@click.version_option(version='0.0.6')
 def cli():
     pass
 
 
 @cli.command()
-@click.option('--template', '-t', help='If you choose to submit your own template if must be in format specified on the README', required=True)
 @click.option('--version', '-v', help='code version')
 @click.option('--dryrun', '-d', help='dry run', is_flag=True)
-@click.option(
-    '--yaml', '-y',
-    help='YAML template (deprecated - YAMLness is now detected at run-time',
-    is_flag=True)
 @click.option('--no-poll', help='Start the stack work but do not poll', is_flag=True)
 @click.option('--ini', '-i', help='INI file with needed information', required=True)
 @click.option('--debug', help='Turn on debugging', required=False, is_flag=True)
 def upsert(
-        template,
         version,
         dryrun,
-        yaml,
         no_poll,
         ini,
         debug
     ):
     '''
-    primary function for creating a bucket
+    primary function for creating a pipeline
     :return:
     '''
 
@@ -63,7 +57,6 @@ def upsert(
     if 'region' not in ini_data['environment']:
         ini_data['environment']['region'] = find_myself()
 
-    ini_data['yaml'] = bool(yaml)
     ini_data['no_poll'] = bool(no_poll)
     ini_data['dryrun'] = bool(dryrun)
 
@@ -73,10 +66,18 @@ def upsert(
     else:
         ini_data['codeVersion'] = str(int(time.time()))
 
-
     print(ini_data)
 
-    project_name = ini_data['meta-parameters']['ProjectName']
+    if 'meta-parameters' in ini_data:
+        if 'ProjectName' in ini_data['meta-parameters']:
+            project_name = ini_data['meta-parameters']['ProjectName']
+        else:
+            print('Need to have ProjectName in meta-parameters')
+            sys.exit(1)
+
+    else:
+        print('Need to have meta-parameters in template to set the cloudformation template project name')
+        sys.exit(1)
 
     if version:
         myversion()
