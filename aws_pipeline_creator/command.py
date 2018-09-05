@@ -22,7 +22,7 @@ def lineno():
 
 
 @click.group()
-@click.version_option(version='0.0.8')
+@click.version_option(version='0.0.9')
 def cli():
     pass
 
@@ -60,6 +60,7 @@ def upsert(
     ini_data['no_poll'] = bool(no_poll)
     ini_data['dryrun'] = bool(dryrun)
 
+    ini_data['cwd'] = str(os.getcwd())
 
     if version:
         ini_data['codeVersion'] = version
@@ -89,6 +90,41 @@ def upsert(
         )
 
 
+@cli.command()
+@click.option('--ini', '-i', help='INI file with needed information', required=True)
+@click.option('--debug', help='Turn on debugging', required=False, is_flag=True)
+def delete(ini, debug):
+    """
+    Delete the given CloudFormation stack.
+    Args:
+        stack - [required] indicatate the stack to smash
+        region - [optional] indicate where the stack is located
+        profile - [optionl[ AWS crendential profile
+    Returns:
+       sys.exit() - 0 is good and 1 is bad
+    """
+
+    ini_data = read_config_info(ini,debug)
+    ini_data['cwd'] = str(os.getcwd())
+
+
+    if 'meta-parameters' in ini_data:
+        if 'ProjectName' in ini_data['meta-parameters']:
+            project_name = ini_data['meta-parameters']['ProjectName']
+        else:
+            print('Need to have ProjectName in meta-parameters')
+            sys.exit(1)
+
+    else:
+        print('Need to have meta-parameters in template to set the cloudformation template project name')
+        sys.exit(1)
+
+    if start_smash(ini_data, debug, project_name):
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
+
 @click.option('--version', '-v', help='Print version and exit', required=False, is_flag=True)
 def version(version):
     """
@@ -105,6 +141,31 @@ def myversion():
     :return: current version
     '''
     print('Version: ' + str(aws_pipeline_creator.__version__))
+
+def start_smash(
+        ini,
+        debug,
+        project_name
+    ):
+    """
+    Facilitate the smashing of a CloudFormation stack
+    Args:
+        command_line - a dictionary to of info to inform the operation
+    Returns:
+       True if happy else False
+    """
+    creator = PipelineCreator(ini,debug,project_name)
+
+    if debug:
+        print('Starting delete')
+
+    if creator.smash():
+        if debug:
+            print('deleted')
+    else:
+        if debug:
+            print('not deleted')
+
 
 def start_create(
         ini,

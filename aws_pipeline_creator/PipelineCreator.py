@@ -36,9 +36,12 @@ class PipelineCreator:
 
         self.debug = False
         self.project_name = None
+        self.cwd = None
 
         if debug:
             self.debug = debug
+
+        self.cwd = str(config_block['cwd'])
 
         if project_name:
             self.project_name = project_name
@@ -65,6 +68,9 @@ class PipelineCreator:
 
         self.stack_driver = CloudStackUtility(config_block)
 
+    def smash(self):
+
+        self.stack_driver.smash()
 
     def create(self):
         """
@@ -380,5 +386,21 @@ class PipelineCreator:
 
         with open(f.name, 'w') as file:
             file.write(json.dumps(template))
+        file.close()
+
+        if self.debug:
+            print('##########################')
+            print('cwd: '+str(self.cwd))
+            print('creating template.json')
+            print('##########################')
+
+        if not os.path.exists(self.cwd+'/template.json'):
+
+            with open(self.cwd+'/template.json','w') as file:
+                file.write(json.dumps(template))
+            file.close()
+        else:
+            if self.debug:
+                print('Not creating template.json')
 
         return f.name
